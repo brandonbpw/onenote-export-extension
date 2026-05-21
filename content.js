@@ -4,19 +4,27 @@ let isExporting = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'startExport') {
-    // Only start if this frame has sections
-    if (getSectionTabs().length > 0) {
-      // Ask background for exclusive lock
+    if (getSectionTabs().length === 0) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    // Claim export lock synchronously via a flag, then verify with background
+    if (isExporting) {
+      sendResponse({ ok: false });
+      return false;
+    }
+    isExporting = true;
+    sendResponse({ ok: true });
+    // Start export after responding
+    setTimeout(() => {
       chrome.runtime.sendMessage({ action: 'claimExport' }, (resp) => {
         if (resp && resp.granted) {
-          isExporting = true;
           startExport(msg.format, msg.delay);
+        } else {
+          isExporting = false;
         }
       });
-      sendResponse({ ok: true });
-    } else {
-      sendResponse({ ok: false });
-    }
+    }, 0);
     return false;
   }
   if (msg.action === 'stopExport') {

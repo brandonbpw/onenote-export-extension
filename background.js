@@ -13,7 +13,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === 'clearStop') {
     shouldStop = false;
-    exportRunning = true;
     sendResponse({ ok: true });
     return false;
   }
