@@ -48,7 +48,7 @@ startBtn.addEventListener('click', async () => {
   progressBar.style.width = '0%';
 
   // Clear stop flag
-  chrome.runtime.sendMessage({ action: 'clearStop' });
+  chrome.runtime.sendMessage({ action: 'clearStop' }, () => { if (chrome.runtime.lastError) {} });
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
@@ -69,6 +69,7 @@ startBtn.addEventListener('click', async () => {
         format: format,
         delay: delay
       }, { frameId: frame.frameId }, (resp) => {
+        if (chrome.runtime.lastError) return; // no content script in this frame
         if (resp && resp.ok && !sent) {
           sent = true;
           log('Export started in frame ' + frame.frameId, 'success');
@@ -85,7 +86,7 @@ startBtn.addEventListener('click', async () => {
 
 // STOP EXPORT
 stopBtn.addEventListener('click', async () => {
-  chrome.runtime.sendMessage({ action: 'setStop' });
+  chrome.runtime.sendMessage({ action: 'setStop' }, () => { if (chrome.runtime.lastError) {} });
   startBtn.disabled = false;
   log('Stop signal sent.', 'warn');
 });
