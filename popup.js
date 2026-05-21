@@ -44,17 +44,43 @@ startBtn.addEventListener('click', async () => {
   const delay = parseInt(document.getElementById('delay').value) || 4000;
 
   startBtn.disabled = true;
-  stopBtn.style.opacity = '1';
   statusDiv.textContent = '';
   progressBar.style.width = '0%';
-  log('Sending export command to all frames...', 'info');
+
+  // Clear stop flag
+  chrome.runtime.sendMessage({ action: 'clearStop' });
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  await sendToAllFrames(tab.id, {
-    action: 'startExport',
-    format: format,
-    delay: delay
-  });
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+
+  if (!frames) {
+    log('No frames found', 'error');
+    startBtn.disabled = false;
+    return;
+  }
+
+  log('Sending to ' + frames.length + ' frames...', 'info');
+
+  let sent = false;
+  for (const frame of frames) {
+    try {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'startExport',
+        format: format,
+        delay: delay
+      }, { frameId: frame.frameId }, (resp) => {
+        if (resp && resp.ok && !sent) {
+          sent = true;
+          log('Export started in frame ' + frame.frameId, 'success');
+        }
+      });
+    } catch(e) {}
+  }
+
+  // If nothing responded after 2s, report
+  setTimeout(() => {
+    if (!sent) log('No frame responded. Try reloading the OneNote page.', 'error');
+  }, 2000);
 });
 
 // STOP EXPORT

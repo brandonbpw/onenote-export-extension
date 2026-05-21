@@ -4,8 +4,11 @@ let isExporting = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'startExport') {
-    startExport(msg.format, msg.delay);
-    sendResponse({ ok: true });
+    // Only start if this frame has sections
+    if (getSectionTabs().length > 0) {
+      startExport(msg.format, msg.delay);
+      sendResponse({ ok: true });
+    }
     return false;
   }
   if (msg.action === 'stopExport') {
