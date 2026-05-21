@@ -4,10 +4,13 @@ let isExporting = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'startExport') {
-    // Only start if this frame has sections
-    if (getSectionTabs().length > 0) {
-      startExport(msg.format, msg.delay);
+    // Only start if this frame has sections AND not already exporting
+    if (!isExporting && getSectionTabs().length > 0) {
+      isExporting = true;
       sendResponse({ ok: true });
+      startExport(msg.format, msg.delay);
+    } else {
+      sendResponse({ ok: false });
     }
     return false;
   }
@@ -168,9 +171,6 @@ async function exportPage(title, sectionName, format) {
 // ============ MAIN LOOP ============
 
 async function startExport(format, delay) {
-  if (isExporting) return;
-  isExporting = true;
-
   // Clear any previous stop signal
   chrome.runtime.sendMessage({ action: 'clearStop' });
 
