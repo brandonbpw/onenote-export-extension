@@ -22,18 +22,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.action === 'downloadFile') {
     if (msg.format === 'pdf') {
-      // Convert HTML to PDF via hidden tab + debugger
       convertToPDF(msg.content, msg.filename.replace('.html', '.pdf'))
         .then(() => sendResponse({ success: true }))
         .catch(err => {
-          console.error('PDF error:', err);
+          console.error('PDF conversion failed:', err.message);
           // Fallback: save as HTML
-          downloadAsFile(msg.content, 'text/html', msg.filename)
+          downloadAsHTML(msg.content, msg.filename)
             .then(() => sendResponse({ success: true, fallback: 'html' }))
             .catch(() => sendResponse({ success: false, error: err.message }));
         });
     } else {
-      downloadAsFile(msg.content, msg.mimeType || 'text/html', msg.filename)
+      downloadAsHTML(msg.content, msg.filename)
         .then(() => sendResponse({ success: true }))
         .catch(err => sendResponse({ success: false, error: err.message }));
     }
@@ -46,63 +45,78 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-function downloadAsFile(content, mimeType, filename) {
+function downloadAsHTML(content, filename) {
+  // Convert HTML string to base64 data URL for download
+  const base64 = btoa(unescape(encodeURIComponent(content)));
+  const dataUrl = 'data:text/html;base64,' + base64;
   return new Promise((resolve, reject) => {
-    const blob = new Blob([content], { type: mimeType });
-    const reader = new FileReader();
-    reader.onload = () => {
-      chrome.downloads.download({
-        url: reader.result,
-        filename: filename,
-        saveAs: false
-      }, (downloadId) => {
-        if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
-        else resolve(downloadId);
-      });
-    };
-    reader.onerror = () => reject(new Error('FileReader error'));
-    reader.readAsDataURL(blob);
+    chrome.downloads.download({
+      url: dataUrl,
+      filename: filename,
+      saveAs: false
+    }, (downloadId) => {
+      if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+      else resolve(downloadId);
+    });
   });
 }
 
 async function convertToPDF(htmlContent, filename) {
-  // Create a blob URL for the HTML
-  const blob = new Blob([htmlContent], { type: 'text/html' });
-  const url = URL.createObjectURL(blob);
+  // Encode HTML as a data URL (service workers can't use blob URLs)
+  const base64Html = btoa(unescape(encodeURIComponent(htmlContent)));
+  const dataUrl = 'data:text/html;base64,' + base64Html;
 
-  // Open hidden tab with the HTML
-  const tab = await chrome.tabs.create({ url: url, active: false });
+  // Open a hidden tab with the HTML content
+  const tab = await chrome.tabs.create({ url: dataUrl, active: false });
 
   // Wait for tab to finish loading
   await new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error('Tab load timeout')), 15000);
-    chrome.tabs.onUpdated.addListener(function listener(tabId, info) {
+    const timeout = setTimeout(() => {
+      reject(new Error('Tab load timeout'));
+    }, 15000);
+
+    function listener(tabId, info) {
       if (tabId === tab.id && info.status === 'complete') {
         chrome.tabs.onUpdated.removeListener(listener);
         clearTimeout(timeout);
         resolve();
       }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+
+  // Wait for rendering
+  await new Promise(r => setTimeout(r, 1000));
+
+  // Attach debugger and print to PDF
+  try {
+    await chrome.debugger.attach({ tabId: tab.id }, '1.3');
+  } catch (e) {
+    await chrome.tabs.remove(tab.id);
+    throw new Error('Debugger attach failed: ' + e.message);
+  }
+
+  let result;
+  try {
+    result = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.printToPDF', {
+      printBackground: true,
+      preferCSSPageSize: false,
+      paperWidth: 8.5,
+      paperHeight: 11,
+      marginTop: 0.4,
+      marginBottom: 0.4,
+      marginLeft: 0.4,
+      marginRight: 0.4
     });
-  });
+  } catch (e) {
+    await chrome.debugger.detach({ tabId: tab.id });
+    await chrome.tabs.remove(tab.id);
+    throw new Error('PrintToPDF failed: ' + e.message);
+  }
 
-  // Give it a moment to render
-  await new Promise(r => setTimeout(r, 800));
-
-  // Use debugger to print to PDF
-  await chrome.debugger.attach({ tabId: tab.id }, '1.3');
-  const result = await chrome.debugger.sendCommand({ tabId: tab.id }, 'Page.printToPDF', {
-    printBackground: true,
-    preferCSSPageSize: false,
-    paperWidth: 8.5,
-    paperHeight: 11,
-    marginTop: 0.4,
-    marginBottom: 0.4,
-    marginLeft: 0.4,
-    marginRight: 0.4
-  });
   await chrome.debugger.detach({ tabId: tab.id });
 
-  // Download the PDF
+  // Download the PDF from base64
   const pdfUrl = 'data:application/pdf;base64,' + result.data;
   await new Promise((resolve, reject) => {
     chrome.downloads.download({
@@ -115,7 +129,6 @@ async function convertToPDF(htmlContent, filename) {
     });
   });
 
-  // Cleanup
+  // Close the temp tab
   await chrome.tabs.remove(tab.id);
-  URL.revokeObjectURL(url);
 }
