@@ -1,22 +1,42 @@
 // Background service worker — handles file downloads and PDF conversion
 
 let shouldStop = false;
+let exportRunning = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'setStop') {
     shouldStop = true;
+    exportRunning = false;
     sendResponse({ ok: true });
     return false;
   }
 
   if (msg.action === 'clearStop') {
     shouldStop = false;
+    exportRunning = true;
     sendResponse({ ok: true });
     return false;
   }
 
   if (msg.action === 'checkStop') {
     sendResponse({ shouldStop: shouldStop });
+    return false;
+  }
+
+  if (msg.action === 'claimExport') {
+    // Only one frame can claim the export
+    if (!exportRunning) {
+      exportRunning = true;
+      sendResponse({ granted: true });
+    } else {
+      sendResponse({ granted: false });
+    }
+    return false;
+  }
+
+  if (msg.action === 'releaseExport') {
+    exportRunning = false;
+    sendResponse({ ok: true });
     return false;
   }
 

@@ -4,11 +4,16 @@ let isExporting = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'startExport') {
-    // Only start if this frame has sections AND not already exporting
-    if (!isExporting && getSectionTabs().length > 0) {
-      isExporting = true;
+    // Only start if this frame has sections
+    if (getSectionTabs().length > 0) {
+      // Ask background for exclusive lock
+      chrome.runtime.sendMessage({ action: 'claimExport' }, (resp) => {
+        if (resp && resp.granted) {
+          isExporting = true;
+          startExport(msg.format, msg.delay);
+        }
+      });
       sendResponse({ ok: true });
-      startExport(msg.format, msg.delay);
     } else {
       sendResponse({ ok: false });
     }
@@ -231,5 +236,6 @@ async function startExport(format, delay) {
   const stopped = await checkStopped();
   notify((stopped ? 'Stopped.' : 'Done!') + ' Exported: ' + totalExported + ', Failed: ' + totalFailed, 'success');
   chrome.runtime.sendMessage({ type: 'done' });
+  chrome.runtime.sendMessage({ action: 'releaseExport' });
   isExporting = false;
 }
