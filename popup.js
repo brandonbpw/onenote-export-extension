@@ -14,11 +14,11 @@ function log(msg, type) {
   statusDiv.insertBefore(entry, statusDiv.firstChild);
 }
 
-// Listen for messages from content script (via background)
+// Listen for messages from content script
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'log') log(msg.text, msg.level);
-  if (msg.type === 'progress') progressBar.style.width = msg.pct + '%';
-  if (msg.type === 'done') {
+  if (msg && msg.type === 'log') log(msg.text, msg.level);
+  if (msg && msg.type === 'progress') progressBar.style.width = msg.pct + '%';
+  if (msg && msg.type === 'done') {
     startBtn.disabled = false;
   }
 });

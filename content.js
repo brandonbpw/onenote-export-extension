@@ -33,11 +33,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 function notify(text, level) {
-  try { chrome.runtime.sendMessage({ type: 'log', text: text, level: level || 'info' }); } catch(e) {}
+  try {
+    chrome.runtime.sendMessage({ type: 'log', text: text, level: level || 'info' }, () => {
+      if (chrome.runtime.lastError) {} // suppress
+    });
+  } catch(e) {}
 }
 
 function progress(pct) {
-  try { chrome.runtime.sendMessage({ type: 'progress', pct: pct }); } catch(e) {}
+  try {
+    chrome.runtime.sendMessage({ type: 'progress', pct: pct }, () => {
+      if (chrome.runtime.lastError) {} // suppress
+    });
+  } catch(e) {}
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -234,7 +242,7 @@ async function startExport(format, delay) {
 
   const stopped = await checkStopped();
   notify((stopped ? 'Stopped.' : 'Done!') + ' Exported: ' + totalExported + ', Failed: ' + totalFailed, 'success');
-  chrome.runtime.sendMessage({ type: 'done' });
-  chrome.runtime.sendMessage({ action: 'releaseExport' });
+  chrome.runtime.sendMessage({ type: 'done' }, () => { if (chrome.runtime.lastError) {} });
+  chrome.runtime.sendMessage({ action: 'releaseExport' }, () => { if (chrome.runtime.lastError) {} });
   isExporting = false;
 }
