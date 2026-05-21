@@ -58,10 +58,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true; // async response
   }
 
-  // Forward messages from content script to popup
-  if (msg.type === 'log' || msg.type === 'progress' || msg.type === 'done') {
-    chrome.runtime.sendMessage(msg).catch(() => {});
-  }
+  // No forwarding needed — popup receives runtime messages directly
 });
 
 function downloadAsHTML(content, filename) {

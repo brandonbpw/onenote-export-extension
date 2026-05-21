@@ -4,27 +4,18 @@ let isExporting = false;
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'startExport') {
-    if (getSectionTabs().length === 0) {
+    // Only run in the onenoteframe URL to avoid duplicates
+    if (!location.href.includes('onenoteframe')) {
       sendResponse({ ok: false });
       return false;
     }
-    // Claim export lock synchronously via a flag, then verify with background
-    if (isExporting) {
+    if (isExporting || getSectionTabs().length === 0) {
       sendResponse({ ok: false });
       return false;
     }
     isExporting = true;
     sendResponse({ ok: true });
-    // Start export after responding
-    setTimeout(() => {
-      chrome.runtime.sendMessage({ action: 'claimExport' }, (resp) => {
-        if (resp && resp.granted) {
-          startExport(msg.format, msg.delay);
-        } else {
-          isExporting = false;
-        }
-      });
-    }, 0);
+    startExport(msg.format, msg.delay);
     return false;
   }
   if (msg.action === 'stopExport') {
