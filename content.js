@@ -6,18 +6,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'startExport') {
     startExport(msg.format, msg.delay);
     sendResponse({ ok: true });
+    return false;
   }
   if (msg.action === 'stopExport') {
     isExporting = false;
+    notify('Stop requested.', 'warn');
     sendResponse({ ok: true });
+    return false;
   }
   if (msg.action === 'ping') {
-    // Check if this frame has the OneNote content
     const hasSections = getSectionTabs().length > 0;
     const hasPages = getPageItems().length > 0;
     sendResponse({ hasSections, hasPages, url: location.href });
+    return false;
   }
-  return true;
 });
 
 function notify(text, level) {
@@ -129,20 +131,21 @@ function buildHTML(title, sectionName, content) {
 
 async function exportPage(title, sectionName, format) {
   const content = getPageContent();
-  if (!content) { notify('  ✗ No content: ' + title, 'error'); return false; }
+  if (!content) { notify('  x No content: ' + title, 'error'); return false; }
 
   const html = buildHTML(title, sectionName, content);
-  const filename = 'OneNote Export/' + sanitize(sectionName) + '_' + sanitize(title) + '.' + format;
+  const baseFilename = sanitize(sectionName) + '_' + sanitize(title);
 
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({
       action: 'downloadFile',
       content: html,
       mimeType: 'text/html',
-      filename: filename
+      filename: 'OneNote Export/' + baseFilename + '.html',
+      format: format
     }, (resp) => {
       if (chrome.runtime.lastError) {
-        notify('  ✗ Download error: ' + chrome.runtime.lastError.message, 'error');
+        notify('  x Download error: ' + chrome.runtime.lastError.message, 'error');
         resolve(false);
       } else {
         resolve(resp && resp.success);

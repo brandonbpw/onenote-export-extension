@@ -4,6 +4,9 @@ const debugBtn = document.getElementById('debugBtn');
 const statusDiv = document.getElementById('status');
 const progressBar = document.getElementById('progressBar');
 
+// Show version from manifest
+document.getElementById('version').textContent = 'v' + chrome.runtime.getManifest().version;
+
 function log(msg, type) {
   const entry = document.createElement('div');
   entry.className = 'log-entry ' + (type || 'info');
