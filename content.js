@@ -32,6 +32,14 @@ function progress(pct) {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
+async function checkStopped() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: 'checkStop' }, (resp) => {
+      resolve(resp && resp.shouldStop);
+    });
+  });
+}
+
 function sanitize(name) {
   return (name || 'untitled').replace(/[<>:"/\\|?*\n\r]/g, '_').trim().substring(0, 100);
 }
@@ -160,12 +168,15 @@ async function startExport(format, delay) {
   if (isExporting) return;
   isExporting = true;
 
+  // Clear any previous stop signal
+  chrome.runtime.sendMessage({ action: 'clearStop' });
+
   notify('Starting export (' + format.toUpperCase() + ')...', 'info');
   notify('Frame URL: ' + location.href.substring(0, 80), 'info');
 
   const sections = getSectionTabs();
   if (sections.length === 0) {
-    notify('❌ No sections found in this frame.', 'error');
+    notify('No sections found in this frame.', 'error');
     notify('Body size: ' + document.body.innerHTML.length + ' chars', 'info');
     chrome.runtime.sendMessage({ type: 'done' });
     isExporting = false;
@@ -175,20 +186,24 @@ async function startExport(format, delay) {
   notify('Found ' + sections.length + ' section(s)', 'success');
   let totalExported = 0, totalFailed = 0, totalPages = 0;
 
-  for (let si = 0; si < sections.length && isExporting; si++) {
+  for (let si = 0; si < sections.length; si++) {
+    if (await checkStopped()) break;
+
     const section = sections[si];
     const sectionName = getElementText(section) || 'Section_' + (si + 1);
-    notify('📂 Section ' + (si+1) + '/' + sections.length + ': ' + sectionName, 'info');
+    notify('Section ' + (si+1) + '/' + sections.length + ': ' + sectionName, 'info');
 
     section.click();
     await sleep(3000);
 
     const pages = getPageItems();
-    if (pages.length === 0) { notify('   ⚠ No pages', 'warn'); continue; }
+    if (pages.length === 0) { notify('   No pages', 'warn'); continue; }
     notify('   ' + pages.length + ' page(s)', 'info');
     totalPages += pages.length;
 
-    for (let pi = 0; pi < pages.length && isExporting; pi++) {
+    for (let pi = 0; pi < pages.length; pi++) {
+      if (await checkStopped()) break;
+
       const page = pages[pi];
       const pageTitle = getElementText(page) || 'Page_' + (pi + 1);
 
@@ -198,17 +213,20 @@ async function startExport(format, delay) {
 
       let success = false;
       try { success = await exportPage(pageTitle, sectionName, format); }
-      catch (err) { notify('  ✗ ' + pageTitle + ': ' + err.message, 'error'); }
+      catch (err) { notify('  x ' + pageTitle + ': ' + err.message, 'error'); }
 
-      if (success) { totalExported++; notify('  ✓ ' + pageTitle, 'success'); }
+      if (success) { totalExported++; notify('  + ' + pageTitle, 'success'); }
       else { totalFailed++; }
 
       progress(Math.round((totalExported + totalFailed) / totalPages * 100));
       await sleep(2500);
     }
+
+    if (await checkStopped()) break;
   }
 
-  notify('✅ Done! Exported: ' + totalExported + ', Failed: ' + totalFailed, 'success');
+  const stopped = await checkStopped();
+  notify((stopped ? 'Stopped.' : 'Done!') + ' Exported: ' + totalExported + ', Failed: ' + totalFailed, 'success');
   chrome.runtime.sendMessage({ type: 'done' });
   isExporting = false;
 }

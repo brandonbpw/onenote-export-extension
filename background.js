@@ -1,6 +1,25 @@
 // Background service worker — handles file downloads and PDF conversion
 
+let shouldStop = false;
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.action === 'setStop') {
+    shouldStop = true;
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.action === 'clearStop') {
+    shouldStop = false;
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.action === 'checkStop') {
+    sendResponse({ shouldStop: shouldStop });
+    return false;
+  }
+
   if (msg.action === 'downloadFile') {
     if (msg.format === 'pdf') {
       // Convert HTML to PDF via hidden tab + debugger

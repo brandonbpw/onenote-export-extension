@@ -60,11 +60,10 @@ startBtn.addEventListener('click', async () => {
 
 // STOP EXPORT
 stopBtn.addEventListener('click', async () => {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  await sendToAllFrames(tab.id, { action: 'stopExport' });
+  chrome.runtime.sendMessage({ action: 'setStop' });
   startBtn.disabled = false;
   stopBtn.disabled = true;
-  log('⏹ Export stopped.', 'warn');
+  log('Stop signal sent.', 'warn');
 });
 
 // DEBUG - scan all frames for OneNote content
