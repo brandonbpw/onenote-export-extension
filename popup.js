@@ -20,7 +20,6 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'progress') progressBar.style.width = msg.pct + '%';
   if (msg.type === 'done') {
     startBtn.disabled = false;
-    stopBtn.disabled = true;
   }
 });
 
@@ -45,7 +44,7 @@ startBtn.addEventListener('click', async () => {
   const delay = parseInt(document.getElementById('delay').value) || 4000;
 
   startBtn.disabled = true;
-  stopBtn.disabled = false;
+  stopBtn.style.opacity = '1';
   statusDiv.textContent = '';
   progressBar.style.width = '0%';
   log('Sending export command to all frames...', 'info');
@@ -62,7 +61,6 @@ startBtn.addEventListener('click', async () => {
 stopBtn.addEventListener('click', async () => {
   chrome.runtime.sendMessage({ action: 'setStop' });
   startBtn.disabled = false;
-  stopBtn.disabled = true;
   log('Stop signal sent.', 'warn');
 });
 
