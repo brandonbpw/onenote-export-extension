@@ -30,6 +30,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ hasSections, hasPages, url: location.href });
     return false;
   }
+  if (msg.action === 'deepScan') {
+    deepScan();
+    sendResponse({ ok: true });
+    return false;
+  }
 });
 
 function notify(text, level) {
@@ -63,6 +68,51 @@ function sanitize(name) {
 }
 
 // ============ DOM HELPERS ============
+
+function deepScan() {
+  notify('--- Deep Scan ---', 'info');
+
+  // Find all treeitems
+  const allTreeItems = document.querySelectorAll('[role="treeitem"]');
+  notify('All treeitems: ' + allTreeItems.length, 'info');
+  for (let i = 0; i < Math.min(allTreeItems.length, 20); i++) {
+    const el = allTreeItems[i];
+    const label = (el.getAttribute('aria-label') || '').substring(0, 60);
+    const expanded = el.getAttribute('aria-expanded');
+    const level = el.getAttribute('aria-level');
+    const cls = (el.className || '').toString().substring(0, 50);
+    notify('  [' + i + '] level=' + level + ' expanded=' + expanded + ' cls=' + cls + ' "' + label + '"', 'info');
+  }
+
+  // Find section list container
+  const secList = document.querySelector('[aria-label="Section List"]');
+  if (secList) {
+    notify('Section List found, children: ' + secList.children.length, 'success');
+    const items = secList.querySelectorAll('[role="treeitem"]');
+    notify('  treeitems inside: ' + items.length, 'info');
+    for (let i = 0; i < items.length; i++) {
+      const el = items[i];
+      const label = (el.getAttribute('aria-label') || '').substring(0, 60);
+      const expanded = el.getAttribute('aria-expanded');
+      notify('  section[' + i + '] expanded=' + expanded + ' "' + label + '"', 'info');
+    }
+  } else {
+    notify('No [aria-label="Section List"] found', 'warn');
+  }
+
+  // Look for section groups specifically
+  const groups = document.querySelectorAll('[aria-expanded]');
+  const groupItems = Array.from(groups).filter(el => {
+    const label = (el.getAttribute('aria-label') || '');
+    return label.includes('Section Group') || label.includes('section group');
+  });
+  notify('Section Groups found: ' + groupItems.length, 'info');
+  for (const g of groupItems) {
+    notify('  Group: "' + (g.getAttribute('aria-label') || '').substring(0, 60) + '" expanded=' + g.getAttribute('aria-expanded'), 'info');
+  }
+
+  notify('--- End Deep Scan ---', 'info');
+}
 
 function getSectionTabs() {
   const items = document.querySelectorAll('[role="treeitem"]');

@@ -124,3 +124,26 @@ debugBtn.addEventListener('click', async () => {
 
   log('--- End Debug ---', 'info');
 });
+
+// DEEP SCAN - detailed section/group info from the OneNote frame
+const deepScanBtn = document.getElementById('deepScanBtn');
+deepScanBtn.addEventListener('click', async () => {
+  statusDiv.textContent = '';
+  log('Running deep scan...', 'info');
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
+
+  if (!frames) { log('No frames', 'error'); return; }
+
+  for (const frame of frames) {
+    if (frame.url && frame.url.includes('onenoteframe')) {
+      chrome.tabs.sendMessage(tab.id, { action: 'deepScan' }, { frameId: frame.frameId }, (resp) => {
+        if (chrome.runtime.lastError) {
+          log('Deep scan failed: ' + chrome.runtime.lastError.message, 'error');
+        }
+      });
+      break;
+    }
+  }
+});
