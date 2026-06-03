@@ -9,7 +9,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse({ ok: false });
       return false;
     }
-    if (isExporting || getSectionTabs().length === 0) {
+    if (isExporting || (getSectionTabs().length === 0 && getSectionGroups().length === 0)) {
       sendResponse({ ok: false });
       return false;
     }
@@ -25,7 +25,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return false;
   }
   if (msg.action === 'ping') {
-    const hasSections = getSectionTabs().length > 0;
+    const hasSections = getSectionTabs().length > 0 || getSectionGroups().length > 0;
     const hasPages = getPageItems().length > 0;
     sendResponse({ hasSections, hasPages, url: location.href });
     return false;
@@ -119,12 +119,60 @@ function getSectionTabs() {
   const sections = [];
   for (const el of items) {
     const label = el.getAttribute('aria-label') || '';
-    if (label.includes('Section')) sections.push(el);
+    // Only regular sections, not section groups
+    if (label.includes('Section') && !label.includes('Section Group')) {
+      sections.push(el);
+    }
   }
-  if (sections.length > 0) return sections;
-  const container = document.querySelector('[aria-label="Section List"]');
-  if (container) return Array.from(container.querySelectorAll('[role="treeitem"]'));
-  return [];
+  return sections;
+}
+
+function getSectionGroups() {
+  const items = document.querySelectorAll('[role="treeitem"]');
+  const groups = [];
+  for (const el of items) {
+    const label = el.getAttribute('aria-label') || '';
+    if (label.includes('Section Group')) {
+      groups.push(el);
+    }
+  }
+  return groups;
+}
+
+async function getAllSectionsIncludingGroups() {
+  // Collect all sections: top-level + inside section groups
+  const allSections = [];
+
+  // Get top-level sections first
+  const topSections = getSectionTabs();
+  for (const s of topSections) {
+    allSections.push({ element: s, groupName: null });
+  }
+
+  // Expand each section group and collect inner sections
+  const groups = getSectionGroups();
+  for (const group of groups) {
+    const groupLabel = getElementText(group);
+    const expanded = group.getAttribute('aria-expanded');
+
+    // Click to expand if collapsed
+    if (expanded === 'false') {
+      group.click();
+      await sleep(1500);
+    }
+
+    // Now find the newly revealed sections (they won't have "Section Group" in label)
+    const currentSections = getSectionTabs();
+    for (const s of currentSections) {
+      // Check if this section is already in our list
+      const already = allSections.some(existing => existing.element === s);
+      if (!already) {
+        allSections.push({ element: s, groupName: groupLabel });
+      }
+    }
+  }
+
+  return allSections;
 }
 
 function getPageItems() {
@@ -234,29 +282,33 @@ async function exportPage(title, sectionName, format) {
 
 async function startExport(format, delay) {
   // Clear any previous stop signal
-  chrome.runtime.sendMessage({ action: 'clearStop' });
+  chrome.runtime.sendMessage({ action: 'clearStop' }, () => { if (chrome.runtime.lastError) {} });
 
   notify('Starting export (' + format.toUpperCase() + ')...', 'info');
   notify('Frame URL: ' + location.href.substring(0, 80), 'info');
 
-  const sections = getSectionTabs();
-  if (sections.length === 0) {
+  // Gather all sections including those inside section groups
+  notify('Scanning sections and section groups...', 'info');
+  const allSections = await getAllSectionsIncludingGroups();
+
+  if (allSections.length === 0) {
     notify('No sections found in this frame.', 'error');
-    notify('Body size: ' + document.body.innerHTML.length + ' chars', 'info');
-    chrome.runtime.sendMessage({ type: 'done' });
+    chrome.runtime.sendMessage({ type: 'done' }, () => { if (chrome.runtime.lastError) {} });
+    chrome.runtime.sendMessage({ action: 'releaseExport' }, () => { if (chrome.runtime.lastError) {} });
     isExporting = false;
     return;
   }
 
-  notify('Found ' + sections.length + ' section(s)', 'success');
+  notify('Found ' + allSections.length + ' section(s) total', 'success');
   let totalExported = 0, totalFailed = 0, totalPages = 0;
 
-  for (let si = 0; si < sections.length; si++) {
+  for (let si = 0; si < allSections.length; si++) {
     if (await checkStopped()) break;
 
-    const section = sections[si];
+    const { element: section, groupName } = allSections[si];
     const sectionName = getElementText(section) || 'Section_' + (si + 1);
-    notify('Section ' + (si+1) + '/' + sections.length + ': ' + sectionName, 'info');
+    const displayName = groupName ? groupName + ' / ' + sectionName : sectionName;
+    notify('Section ' + (si+1) + '/' + allSections.length + ': ' + displayName, 'info');
 
     section.click();
     await sleep(3000);
@@ -276,8 +328,11 @@ async function startExport(format, delay) {
       clickTarget.click();
       await sleep(delay);
 
+      // Use group/section path for filename
+      const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
+
       let success = false;
-      try { success = await exportPage(pageTitle, sectionName, format); }
+      try { success = await exportPage(pageTitle, folderName, format); }
       catch (err) { notify('  x ' + pageTitle + ': ' + err.message, 'error'); }
 
       if (success) { totalExported++; notify('  + ' + pageTitle, 'success'); }
