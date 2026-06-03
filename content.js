@@ -234,6 +234,9 @@ function getElementText(el) {
     text = titleEl ? (titleEl.getAttribute('aria-label') || titleEl.textContent || '') : (el.innerText || el.textContent || '');
   }
   text = text.trim();
+  // Clean section group labels like "ARCHIVE, Section Group. Select to expand..."
+  if (text.includes(', Section Group.')) text = text.split(', Section Group.')[0].trim();
+  // Clean section labels like "Overview, Section. Select to switch..."
   if (text.includes(', Section.')) text = text.split(', Section.')[0].trim();
   if (text.includes('. Selected.')) { text = text.split('. Selected.')[0].trim(); if (text.includes(', Section')) text = text.split(', Section')[0].trim(); }
   if (text.startsWith('Page Title ')) text = text.replace('Page Title ', '').trim();
