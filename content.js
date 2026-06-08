@@ -297,22 +297,54 @@ async function exportPage(title, sectionName, format, notebookFolder) {
   const html = buildHTML(title, sectionName, content);
   const baseFilename = sanitize(sectionName) + '_' + sanitize(title);
 
-  return new Promise((resolve) => {
+  // First attempt — check for duplicates
+  const resp = await new Promise((resolve) => {
     chrome.runtime.sendMessage({
       action: 'downloadFile',
       content: html,
       mimeType: 'text/html',
       filename: notebookFolder + '/' + baseFilename + '.html',
-      format: format
-    }, (resp) => {
+      format: format,
+      allowDuplicate: false
+    }, (r) => {
       if (chrome.runtime.lastError) {
-        notify('  x Download error: ' + chrome.runtime.lastError.message, 'error');
-        resolve(false);
+        resolve({ success: false, error: chrome.runtime.lastError.message });
       } else {
-        resolve(resp && resp.success);
+        resolve(r || { success: false });
       }
     });
   });
+
+  if (resp.success) return true;
+
+  if (resp.duplicate) {
+    // File already exists — ask user
+    const answer = confirm(
+      'File already exists:\n' + resp.filename +
+      '\n\nOK = Replace (download again)\nCancel = Skip this page'
+    );
+    if (!answer) {
+      notify('  - Skipped (exists): ' + title, 'warn');
+      return true; // count as success since it already exists
+    }
+    // Re-download with allowDuplicate
+    const retryResp = await new Promise((resolve) => {
+      chrome.runtime.sendMessage({
+        action: 'downloadFile',
+        content: html,
+        mimeType: 'text/html',
+        filename: notebookFolder + '/' + baseFilename + '.html',
+        format: format,
+        allowDuplicate: true
+      }, (r) => {
+        if (chrome.runtime.lastError) resolve({ success: false });
+        else resolve(r || { success: false });
+      });
+    });
+    return retryResp.success;
+  }
+
+  return false;
 }
 
 // ============ MAIN LOOP ============
@@ -341,50 +373,8 @@ async function startExport(format, delay) {
     return;
   }
 
-  // Scan all pages first to detect duplicates
-  notify('Scanning all pages for duplicates...', 'info');
-  const allPageNames = [];
-  for (let si = 0; si < allSections.length; si++) {
-    const { element: section, groupName } = allSections[si];
-    const sectionName = getElementText(section) || 'Section_' + (si + 1);
-    const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
-
-    section.click();
-    await sleep(2000);
-
-    const pages = getPageItems();
-    for (const page of pages) {
-      const pageTitle = getElementText(page) || 'Untitled';
-      const filename = folderName + '_' + sanitize(pageTitle);
-      allPageNames.push(filename);
-    }
-  }
-
-  // Check for duplicates
-  const seen = {};
-  const duplicates = [];
-  for (const name of allPageNames) {
-    if (seen[name]) duplicates.push(name);
-    else seen[name] = true;
-  }
-
-  let duplicateMode = 'replace'; // default
-  if (duplicates.length > 0) {
-    notify('Found ' + duplicates.length + ' duplicate filename(s)', 'warn');
-    // Ask user via confirm dialog
-    const answer = confirm(
-      'Found ' + duplicates.length + ' duplicate page name(s):\n\n' +
-      duplicates.slice(0, 5).join('\n') +
-      (duplicates.length > 5 ? '\n... and ' + (duplicates.length - 5) + ' more' : '') +
-      '\n\nClick OK to make copies (add number suffix)\nClick Cancel to skip duplicates'
-    );
-    duplicateMode = answer ? 'copy' : 'skip';
-    notify('Duplicate handling: ' + duplicateMode, 'info');
-  }
-
-  notify('Found ' + allSections.length + ' section(s), ' + allPageNames.length + ' page(s) total', 'success');
-  let totalExported = 0, totalFailed = 0;
-  const exportedFiles = {};
+  notify('Found ' + allSections.length + ' section(s) total', 'success');
+  let totalExported = 0, totalFailed = 0, totalPages = 0;
 
   for (let si = 0; si < allSections.length; si++) {
     if (await checkStopped()) break;
@@ -407,25 +397,12 @@ async function startExport(format, delay) {
 
       const page = pages[pi];
       const pageTitle = getElementText(page) || 'Page_' + (pi + 1);
-      let filename = folderName + '_' + sanitize(pageTitle);
-
-      // Handle duplicates
-      if (exportedFiles[filename]) {
-        if (duplicateMode === 'skip') {
-          notify('  - Skipped (duplicate): ' + pageTitle, 'warn');
-          continue;
-        } else {
-          // Add counter suffix
-          let counter = 2;
-          while (exportedFiles[filename + '_' + counter]) counter++;
-          filename = filename + '_' + counter;
-        }
-      }
-      exportedFiles[filename] = true;
 
       const clickTarget = page.querySelector('[tabindex], [role="button"], a, button') || page;
       clickTarget.click();
       await sleep(delay);
+
+      const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
 
       let success = false;
       try { success = await exportPage(pageTitle, folderName, format, notebookFolder); }
@@ -434,7 +411,8 @@ async function startExport(format, delay) {
       if (success) { totalExported++; notify('  + ' + pageTitle, 'success'); }
       else { totalFailed++; }
 
-      progress(Math.round((totalExported + totalFailed) / allPageNames.length * 100));
+      totalPages++;
+      progress(Math.round(totalPages / (allSections.length * 5) * 100)); // rough estimate
       await sleep(2500);
     }
 

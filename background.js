@@ -40,21 +40,33 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.action === 'downloadFile') {
-    if (msg.format === 'pdf') {
-      convertToPDF(msg.content, msg.filename.replace('.html', '.pdf'))
-        .then(() => sendResponse({ success: true }))
-        .catch(err => {
-          console.error('PDF conversion failed:', err.message);
-          // Fallback: save as HTML
-          downloadAsHTML(msg.content, msg.filename)
-            .then(() => sendResponse({ success: true, fallback: 'html' }))
-            .catch(() => sendResponse({ success: false, error: err.message }));
-        });
-    } else {
-      downloadAsHTML(msg.content, msg.filename)
-        .then(() => sendResponse({ success: true }))
-        .catch(err => sendResponse({ success: false, error: err.message }));
-    }
+    const filename = msg.format === 'pdf' ? msg.filename.replace('.html', '.pdf') : msg.filename;
+
+    // Check if file was already downloaded (duplicate detection)
+    chrome.downloads.search({ filenameRegex: filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }, (results) => {
+      const exists = results && results.length > 0;
+
+      if (exists && !msg.allowDuplicate) {
+        // File already exists — ask background to notify content script
+        sendResponse({ success: false, duplicate: true, filename: filename });
+        return;
+      }
+
+      if (msg.format === 'pdf') {
+        convertToPDF(msg.content, filename)
+          .then(() => sendResponse({ success: true }))
+          .catch(err => {
+            console.error('PDF conversion failed:', err.message);
+            downloadAsHTML(msg.content, msg.filename)
+              .then(() => sendResponse({ success: true, fallback: 'html' }))
+              .catch(() => sendResponse({ success: false, error: err.message }));
+          });
+      } else {
+        downloadAsHTML(msg.content, msg.filename)
+          .then(() => sendResponse({ success: true }))
+          .catch(err => sendResponse({ success: false, error: err.message }));
+      }
+    });
     return true; // async response
   }
 
