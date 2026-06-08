@@ -11,7 +11,8 @@ function log(msg, type) {
   const entry = document.createElement('div');
   entry.className = 'log-entry ' + (type || 'info');
   entry.textContent = msg;
-  statusDiv.insertBefore(entry, statusDiv.firstChild);
+  statusDiv.appendChild(entry);
+  statusDiv.scrollTop = statusDiv.scrollHeight;
 }
 
 // Listen for messages from content script
