@@ -292,7 +292,7 @@ function buildHTML(title, sectionName, content) {
 
 async function exportPage(title, sectionName, format, notebookFolder, duplicateMode) {
   const content = getPageContent();
-  if (!content) { notify('  x No content: ' + title, 'error'); return false; }
+  if (!content) { notify('  x No content: ' + title, 'error'); return 'failed'; }
 
   const html = buildHTML(title, sectionName, content);
   const baseFilename = sanitize(sectionName) + '_' + sanitize(title);
@@ -315,16 +315,15 @@ async function exportPage(title, sectionName, format, notebookFolder, duplicateM
     });
   });
 
-  if (resp.success) return true;
+  if (resp.success) return 'exported';
 
   if (resp.duplicate) {
     if (duplicateMode === 'skip') {
-      notify('  - Skipped (exists): ' + title, 'warn');
-      return true;
+      return 'skipped';
     }
   }
 
-  return false;
+  return 'failed';
 }
 
 // ============ MAIN LOOP ============
@@ -353,7 +352,7 @@ async function startExport(format, delay, duplicateMode) {
   }
 
   notify('Found ' + allSections.length + ' section(s) total', 'success');
-  let totalExported = 0, totalFailed = 0, totalPages = 0;
+  let totalExported = 0, totalFailed = 0, totalSkipped = 0, totalPages = 0;
 
   for (let si = 0; si < allSections.length; si++) {
     if (await checkStopped()) break;
@@ -383,12 +382,13 @@ async function startExport(format, delay, duplicateMode) {
 
       const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
 
-      let success = false;
-      try { success = await exportPage(pageTitle, folderName, format, notebookFolder, duplicateMode); }
+      let result = 'failed';
+      try { result = await exportPage(pageTitle, folderName, format, notebookFolder, duplicateMode); }
       catch (err) { notify('  x ' + pageTitle + ': ' + err.message, 'error'); }
 
-      if (success) { totalExported++; notify('  + ' + pageTitle, 'success'); }
-      else { totalFailed++; }
+      if (result === 'exported') { totalExported++; notify('  + ' + pageTitle, 'success'); }
+      else if (result === 'skipped') { totalSkipped++; notify('  - ' + pageTitle + ' (exists)', 'warn'); }
+      else { totalFailed++; notify('  x ' + pageTitle, 'error'); }
 
       totalPages++;
       progress(Math.round(totalPages / (allSections.length * 5) * 100)); // rough estimate
@@ -399,7 +399,11 @@ async function startExport(format, delay, duplicateMode) {
   }
 
   const stopped = await checkStopped();
-  notify((stopped ? 'Stopped.' : 'Done!') + ' Exported: ' + totalExported + ', Failed: ' + totalFailed, 'success');
+  let summary = stopped ? 'Stopped.' : 'Done!';
+  summary += ' Exported: ' + totalExported;
+  if (totalSkipped > 0) summary += ', Skipped: ' + totalSkipped;
+  if (totalFailed > 0) summary += ', Failed: ' + totalFailed;
+  notify(summary, 'success');
   chrome.runtime.sendMessage({ type: 'done' }, () => { if (chrome.runtime.lastError) {} });
   chrome.runtime.sendMessage({ action: 'releaseExport' }, () => { if (chrome.runtime.lastError) {} });
   isExporting = false;
