@@ -43,6 +43,7 @@ async function sendToAllFrames(tabId, message) {
 startBtn.addEventListener('click', async () => {
   const format = document.getElementById('format').value;
   const delay = parseInt(document.getElementById('delay').value) || 4000;
+  const duplicateMode = document.getElementById('duplicateMode').value;
 
   startBtn.disabled = true;
   statusDiv.textContent = '';
@@ -68,7 +69,8 @@ startBtn.addEventListener('click', async () => {
       chrome.tabs.sendMessage(tab.id, {
         action: 'startExport',
         format: format,
-        delay: delay
+        delay: delay,
+        duplicateMode: duplicateMode
       }, { frameId: frame.frameId }, (resp) => {
         if (chrome.runtime.lastError) return; // no content script in this frame
         if (resp && resp.ok && !sent) {

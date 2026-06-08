@@ -15,7 +15,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     isExporting = true;
     sendResponse({ ok: true });
-    startExport(msg.format, msg.delay);
+    startExport(msg.format, msg.delay, msg.duplicateMode || 'skip');
     return false;
   }
   if (msg.action === 'stopExport') {
@@ -290,14 +290,14 @@ function buildHTML(title, sectionName, content) {
 </head><body><h1>${title}</h1><p style="color:#666;font-style:italic">Section: ${sectionName}</p>${clone.innerHTML}</body></html>`;
 }
 
-async function exportPage(title, sectionName, format, notebookFolder) {
+async function exportPage(title, sectionName, format, notebookFolder, duplicateMode) {
   const content = getPageContent();
   if (!content) { notify('  x No content: ' + title, 'error'); return false; }
 
   const html = buildHTML(title, sectionName, content);
   const baseFilename = sanitize(sectionName) + '_' + sanitize(title);
 
-  // First attempt — check for duplicates
+  // Check for duplicates
   const resp = await new Promise((resolve) => {
     chrome.runtime.sendMessage({
       action: 'downloadFile',
@@ -305,7 +305,7 @@ async function exportPage(title, sectionName, format, notebookFolder) {
       mimeType: 'text/html',
       filename: notebookFolder + '/' + baseFilename + '.html',
       format: format,
-      allowDuplicate: false
+      allowDuplicate: (duplicateMode === 'replace')
     }, (r) => {
       if (chrome.runtime.lastError) {
         resolve({ success: false, error: chrome.runtime.lastError.message });
@@ -318,77 +318,23 @@ async function exportPage(title, sectionName, format, notebookFolder) {
   if (resp.success) return true;
 
   if (resp.duplicate) {
-    // Check if we already have a "do for all" decision
-    if (!exportPage._duplicateChoice) {
-      const answer = prompt(
-        'File already exists: ' + resp.filename +
-        '\n\nType your choice:\n' +
-        '  "replace" — Overwrite all duplicates\n' +
-        '  "skip" — Skip all duplicates\n' +
-        '  "ask" — Ask me each time\n\n' +
-        'This applies to all remaining duplicates.',
-        'replace'
-      );
-      if (answer === null || answer.toLowerCase().startsWith('s')) {
-        exportPage._duplicateChoice = 'skip';
-      } else if (answer.toLowerCase().startsWith('a')) {
-        exportPage._duplicateChoice = 'ask';
-      } else {
-        exportPage._duplicateChoice = 'replace';
-      }
-      notify('Duplicate mode: ' + exportPage._duplicateChoice, 'info');
-    }
-
-    const choice = exportPage._duplicateChoice;
-
-    if (choice === 'skip') {
+    if (duplicateMode === 'skip') {
       notify('  - Skipped (exists): ' + title, 'warn');
       return true;
     }
-
-    if (choice === 'ask') {
-      const individual = confirm('Replace existing file?\n' + resp.filename + '\n\nOK = Replace, Cancel = Skip');
-      if (!individual) {
-        notify('  - Skipped: ' + title, 'warn');
-        return true;
-      }
-    }
-
-    // Download with allowDuplicate
-    const retryResp = await new Promise((resolve) => {
-      chrome.runtime.sendMessage({
-        action: 'downloadFile',
-        content: html,
-        mimeType: 'text/html',
-        filename: notebookFolder + '/' + baseFilename + '.html',
-        format: format,
-        allowDuplicate: true
-      }, (r) => {
-        if (chrome.runtime.lastError) resolve({ success: false });
-        else resolve(r || { success: false });
-      });
-    });
-    return retryResp.success;
   }
 
   return false;
 }
 
-// Reset duplicate choice between exports
-function resetExportState() {
-  exportPage._duplicateChoice = null;
-}
-
 // ============ MAIN LOOP ============
 
-async function startExport(format, delay) {
+async function startExport(format, delay, duplicateMode) {
   // Clear any previous stop signal
   chrome.runtime.sendMessage({ action: 'clearStop' }, () => { if (chrome.runtime.lastError) {} });
 
   notify('Starting export (' + format.toUpperCase() + ')...', 'info');
-
-  // Reset duplicate handling from previous runs
-  resetExportState();
+  notify('Duplicates: ' + duplicateMode, 'info');
 
   // Get notebook name for folder
   const notebookName = getNotebookName();
@@ -440,7 +386,7 @@ async function startExport(format, delay) {
       const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
 
       let success = false;
-      try { success = await exportPage(pageTitle, folderName, format, notebookFolder); }
+      try { success = await exportPage(pageTitle, folderName, format, notebookFolder, duplicateMode); }
       catch (err) { notify('  x ' + pageTitle + ': ' + err.message, 'error'); }
 
       if (success) { totalExported++; notify('  + ' + pageTitle, 'success'); }
