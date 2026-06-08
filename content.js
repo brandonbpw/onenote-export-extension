@@ -67,6 +67,40 @@ function sanitize(name) {
   return (name || 'untitled').replace(/[<>:"/\\|?*\n\r]/g, '_').trim().substring(0, 100);
 }
 
+function getNotebookName() {
+  // Try to find the notebook name from the page title or UI elements
+  // OneNote shows it in the header/breadcrumb area
+  const selectors = [
+    '[aria-label*="Notebook"] [class*="title"]',
+    '[aria-label*="notebook"] [class*="title"]',
+    '[class*="NotebookName"]',
+    '[class*="notebookName"]',
+    '[aria-label*="Notebook name"]',
+    'button[aria-label*="Notebook"]',
+  ];
+  for (const sel of selectors) {
+    const el = document.querySelector(sel);
+    if (el) {
+      const text = (el.textContent || el.getAttribute('aria-label') || '').trim();
+      if (text && text.length > 1 && text.length < 100) return text;
+    }
+  }
+  // Try document title — often "PageName - NotebookName"
+  const title = document.title || '';
+  if (title.includes(' - ')) {
+    const parts = title.split(' - ');
+    // Last part is usually the notebook name
+    const candidate = parts[parts.length - 1].trim();
+    if (candidate && candidate.length > 1) return candidate;
+  }
+  // Try the URL for notebook name hints
+  const urlMatch = location.href.match(/target\(([^|]+)/);
+  if (urlMatch) {
+    return urlMatch[1].replace('.one', '').replace(/%20/g, ' ');
+  }
+  return 'OneNote';
+}
+
 // ============ DOM HELPERS ============
 
 function deepScan() {
@@ -256,7 +290,7 @@ function buildHTML(title, sectionName, content) {
 </head><body><h1>${title}</h1><p style="color:#666;font-style:italic">Section: ${sectionName}</p>${clone.innerHTML}</body></html>`;
 }
 
-async function exportPage(title, sectionName, format) {
+async function exportPage(title, sectionName, format, notebookFolder) {
   const content = getPageContent();
   if (!content) { notify('  x No content: ' + title, 'error'); return false; }
 
@@ -268,7 +302,7 @@ async function exportPage(title, sectionName, format) {
       action: 'downloadFile',
       content: html,
       mimeType: 'text/html',
-      filename: 'OneNote Export/' + baseFilename + '.html',
+      filename: notebookFolder + '/' + baseFilename + '.html',
       format: format
     }, (resp) => {
       if (chrome.runtime.lastError) {
@@ -288,7 +322,12 @@ async function startExport(format, delay) {
   chrome.runtime.sendMessage({ action: 'clearStop' }, () => { if (chrome.runtime.lastError) {} });
 
   notify('Starting export (' + format.toUpperCase() + ')...', 'info');
-  notify('Frame URL: ' + location.href.substring(0, 80), 'info');
+
+  // Get notebook name for folder
+  const notebookName = getNotebookName();
+  const notebookFolder = sanitize(notebookName) + ' Export';
+  notify('Notebook: ' + notebookName, 'info');
+  notify('Output folder: ' + notebookFolder + '/', 'info');
 
   // Gather all sections including those inside section groups
   notify('Scanning sections and section groups...', 'info');
@@ -302,8 +341,50 @@ async function startExport(format, delay) {
     return;
   }
 
-  notify('Found ' + allSections.length + ' section(s) total', 'success');
-  let totalExported = 0, totalFailed = 0, totalPages = 0;
+  // Scan all pages first to detect duplicates
+  notify('Scanning all pages for duplicates...', 'info');
+  const allPageNames = [];
+  for (let si = 0; si < allSections.length; si++) {
+    const { element: section, groupName } = allSections[si];
+    const sectionName = getElementText(section) || 'Section_' + (si + 1);
+    const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
+
+    section.click();
+    await sleep(2000);
+
+    const pages = getPageItems();
+    for (const page of pages) {
+      const pageTitle = getElementText(page) || 'Untitled';
+      const filename = folderName + '_' + sanitize(pageTitle);
+      allPageNames.push(filename);
+    }
+  }
+
+  // Check for duplicates
+  const seen = {};
+  const duplicates = [];
+  for (const name of allPageNames) {
+    if (seen[name]) duplicates.push(name);
+    else seen[name] = true;
+  }
+
+  let duplicateMode = 'replace'; // default
+  if (duplicates.length > 0) {
+    notify('Found ' + duplicates.length + ' duplicate filename(s)', 'warn');
+    // Ask user via confirm dialog
+    const answer = confirm(
+      'Found ' + duplicates.length + ' duplicate page name(s):\n\n' +
+      duplicates.slice(0, 5).join('\n') +
+      (duplicates.length > 5 ? '\n... and ' + (duplicates.length - 5) + ' more' : '') +
+      '\n\nClick OK to make copies (add number suffix)\nClick Cancel to skip duplicates'
+    );
+    duplicateMode = answer ? 'copy' : 'skip';
+    notify('Duplicate handling: ' + duplicateMode, 'info');
+  }
+
+  notify('Found ' + allSections.length + ' section(s), ' + allPageNames.length + ' page(s) total', 'success');
+  let totalExported = 0, totalFailed = 0;
+  const exportedFiles = {};
 
   for (let si = 0; si < allSections.length; si++) {
     if (await checkStopped()) break;
@@ -311,6 +392,7 @@ async function startExport(format, delay) {
     const { element: section, groupName } = allSections[si];
     const sectionName = getElementText(section) || 'Section_' + (si + 1);
     const displayName = groupName ? groupName + ' / ' + sectionName : sectionName;
+    const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
     notify('Section ' + (si+1) + '/' + allSections.length + ': ' + displayName, 'info');
 
     section.click();
@@ -319,29 +401,40 @@ async function startExport(format, delay) {
     const pages = getPageItems();
     if (pages.length === 0) { notify('   No pages', 'warn'); continue; }
     notify('   ' + pages.length + ' page(s)', 'info');
-    totalPages += pages.length;
 
     for (let pi = 0; pi < pages.length; pi++) {
       if (await checkStopped()) break;
 
       const page = pages[pi];
       const pageTitle = getElementText(page) || 'Page_' + (pi + 1);
+      let filename = folderName + '_' + sanitize(pageTitle);
+
+      // Handle duplicates
+      if (exportedFiles[filename]) {
+        if (duplicateMode === 'skip') {
+          notify('  - Skipped (duplicate): ' + pageTitle, 'warn');
+          continue;
+        } else {
+          // Add counter suffix
+          let counter = 2;
+          while (exportedFiles[filename + '_' + counter]) counter++;
+          filename = filename + '_' + counter;
+        }
+      }
+      exportedFiles[filename] = true;
 
       const clickTarget = page.querySelector('[tabindex], [role="button"], a, button') || page;
       clickTarget.click();
       await sleep(delay);
 
-      // Use group/section path for filename
-      const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
-
       let success = false;
-      try { success = await exportPage(pageTitle, folderName, format); }
+      try { success = await exportPage(pageTitle, folderName, format, notebookFolder); }
       catch (err) { notify('  x ' + pageTitle + ': ' + err.message, 'error'); }
 
       if (success) { totalExported++; notify('  + ' + pageTitle, 'success'); }
       else { totalFailed++; }
 
-      progress(Math.round((totalExported + totalFailed) / totalPages * 100));
+      progress(Math.round((totalExported + totalFailed) / allPageNames.length * 100));
       await sleep(2500);
     }
 
