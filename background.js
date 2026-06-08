@@ -42,16 +42,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === 'downloadFile') {
     const filename = msg.format === 'pdf' ? msg.filename.replace('.html', '.pdf') : msg.filename;
 
-    // Check if file was already downloaded (duplicate detection)
-    chrome.downloads.search({ filenameRegex: filename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') }, (results) => {
-      const exists = results && results.length > 0;
+    // Check if file was already downloaded
+    chrome.downloads.search({ filenameRegex: '.*' + escapeRegex(filename.split('/').pop()) + '$' }, (results) => {
+      const existing = results && results.filter(r => r.filename && r.filename.endsWith(filename.split('/').pop()));
 
-      if (exists && !msg.allowDuplicate) {
-        // File already exists — ask background to notify content script
+      if (existing && existing.length > 0 && !msg.allowDuplicate) {
         sendResponse({ success: false, duplicate: true, filename: filename });
         return;
       }
 
+      // If replacing, delete existing files first
+      if (existing && existing.length > 0 && msg.allowDuplicate) {
+        for (const item of existing) {
+          try {
+            chrome.downloads.removeFile(item.id);
+            chrome.downloads.erase({ id: item.id });
+          } catch(e) {}
+        }
+      }
+
+      // Now download
       if (msg.format === 'pdf') {
         convertToPDF(msg.content, filename)
           .then(() => sendResponse({ success: true }))
@@ -72,6 +82,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   // No forwarding needed — popup receives runtime messages directly
 });
+
+function escapeRegex(str) {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function downloadAsHTML(content, filename) {
   // Convert HTML string to base64 data URL for download

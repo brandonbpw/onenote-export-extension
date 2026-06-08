@@ -339,11 +339,9 @@ async function startExport(format, delay, duplicateMode) {
   // Get notebook name for folder
   const notebookName = getNotebookName();
   const notebookFolder = sanitize(notebookName) + ' Export';
-  notify('Notebook: ' + notebookName, 'info');
-  notify('Output folder: ' + notebookFolder + '/', 'info');
+  notify('Folder: ' + notebookFolder, 'info');
 
   // Gather all sections including those inside section groups
-  notify('Scanning sections and section groups...', 'info');
   const allSections = await getAllSectionsIncludingGroups();
 
   if (allSections.length === 0) {
@@ -364,14 +362,14 @@ async function startExport(format, delay, duplicateMode) {
     const sectionName = getElementText(section) || 'Section_' + (si + 1);
     const displayName = groupName ? groupName + ' / ' + sectionName : sectionName;
     const folderName = groupName ? sanitize(groupName) + '_' + sanitize(sectionName) : sanitize(sectionName);
-    notify('Section ' + (si+1) + '/' + allSections.length + ': ' + displayName, 'info');
+    notify('[' + (si+1) + '/' + allSections.length + '] ' + displayName, 'info');
 
     section.click();
     await sleep(3000);
 
     const pages = getPageItems();
-    if (pages.length === 0) { notify('   No pages', 'warn'); continue; }
-    notify('   ' + pages.length + ' page(s)', 'info');
+    if (pages.length === 0) { notify('  No pages', 'warn'); continue; }
+    notify('  ' + pages.length + ' pages', 'info');
 
     for (let pi = 0; pi < pages.length; pi++) {
       if (await checkStopped()) break;
